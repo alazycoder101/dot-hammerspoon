@@ -11,8 +11,6 @@ ctrl_cmd    = {"cmd","ctrl"}
 
 col = hs.drawing.color.x11
 
-work_logo = hs.image.imageFromPath(hs.configdir .. "/files/work_logo_2x.png")
-
 hs.loadSpoon("SpoonInstall")
 
 spoon.SpoonInstall.repos.zzspoons = {
@@ -28,6 +26,7 @@ Install=spoon.SpoonInstall
 Install:andUse("ModalMgr", {
                }
 )
+
 Install:andUse("BetterTouchTool", { loglevel = 'debug' })
 BTT = spoon.BetterTouchTool
 
@@ -51,12 +50,6 @@ Install:andUse("URLDispatcher",
                {
                  config = {
                    url_patterns = {
-                     { "https?://collab.*%.swisscom%.com", CollabApp },
-                     { "https?://smca%.swisscom%.com",     SmcaApp },
-                     { "https?://app.*%.opsgenie%.com",    OpsGenieApp },
-                     { "https?://.*%.swisscom%.ch",        WorkBrowser },
-                     { "https?://.*%.swisscom%.com",       WorkBrowser },
-                     { "https?://.*%.sharepoint%.com",     WorkBrowser },
                      { "https?://.*%.office%.com",         WorkBrowser },
                      { "https?://.*%.corproot%.net",       WorkBrowser }
                    },
@@ -130,27 +123,6 @@ function chrome_item(n)
   return { apptype = "chromeapp", itemname = n }
 end
 
-function OF_register_additional_apps(s)
-  s:registerApplication("Swisscom Collab", chrome_item("tab"))
-  s:registerApplication("Swisscom Wiki", chrome_item("wiki page"))
-  s:registerApplication("Swisscom Jira", chrome_item("issue"))
-  s:registerApplication("Brave Browser Dev", chrome_item("page"))
-end
-
-Install:andUse("SendToOmniFocus",
-               {
-                 disable = true,
-                 config = {
-                   quickentrydialog = false,
-                   notifications = false
-                 },
-                 hotkeys = {
-                   send_to_omnifocus = { hyper, "t" }
-                 },
-                 fn = OF_register_additional_apps,
-               }
-)
-
 org_capture_path = os.getenv("HOME").."/.hammerspoon/files/org-capture.lua"
 script_file = io.open(org_capture_path, "w")
 script_file:write([[local win = hs.window.frontmostWindow()
@@ -187,7 +159,7 @@ Install:andUse("TextClipboardHistory",
                    show_in_menubar = false,
                  },
                  hotkeys = {
-                   toggle_clipboard = { { "cmd", "shift" }, "v" } },
+                   toggle_clipboard = { hyper, "v" } },
                  start = true,
                }
 )
@@ -367,18 +339,6 @@ Install:andUse("Seal",
                            url = "http://hammerspoon.org/docs/",
                            icon = hs.image.imageFromName(hs.image.systemImageNames.ApplicationIcon),
                          },
-                         ["Leave corpnet"] = {
-                           fn = function()
-                             spoon.WiFiTransitions:processTransition('foo', 'corpnet01')
-                           end,
-                           icon = work_logo,
-                         },
-                         ["Arrive in corpnet"] = {
-                           fn = function()
-                             spoon.WiFiTransitions:processTransition('corpnet01', 'foo')
-                           end,
-                           icon = work_logo,
-                         },
                          ["Translate using Leo"] = {
                            url = "http://dict.leo.org/englisch-deutsch/${query}",
                            icon = 'favicon',
@@ -390,51 +350,6 @@ Install:andUse("Seal",
                  start = true,
                }
 )
-
-function reconfigSpotifyProxy(proxy)
-  local spotify = hs.appfinder.appFromName("Spotify")
-  local lastapp = nil
-  if spotify then
-    lastapp = hs.application.frontmostApplication()
-    spotify:kill()
-    hs.timer.usleep(40000)
-  end
-  -- I use CFEngine to reconfigure the Spotify preferences
-  cmd = string.format(
-    "/usr/local/bin/cf-agent -K -f %s/files/spotify-proxymode.cf%s",
-    hs.configdir, (proxy and " -DPROXY" or " -DNOPROXY"))
-  output, status, t, rc = hs.execute(cmd)
-  if spotify and lastapp then
-    hs.timer.doAfter(
-      3,
-      function()
-        if not hs.application.launchOrFocus("Spotify") then
-          hs.notify.show("Error launching Spotify", "", "")
-        end
-        if lastapp then
-          hs.timer.doAfter(0.5, hs.fnutils.partial(lastapp.activate, lastapp))
-        end
-    end)
-  end
-end
-
-function reconfigAdiumProxy(proxy)
-  app = hs.application.find("Adium")
-  if app and app:isRunning() then
-    local script = string.format([[
-  tell application "Adium"
-    repeat with a in accounts
-      if (enabled of a) is true then
-        set proxy enabled of a to %s
-      end if
-    end repeat
-    go offline
-    go online
-  end tell
-  ]], hs.inspect(proxy))
-    hs.osascript.applescript(script)
-  end
-end
 
 function stopApp(name)
   app = hs.application.get(name)
@@ -450,38 +365,6 @@ end
 function startApp(name)
   hs.application.open(name)
 end
-
-Install:andUse("WiFiTransitions",
-               {
-                 config = {
-                   actions = {
-                     -- { -- Test action just to see the SSID transitions
-                     --    fn = function(_, _, prev_ssid, new_ssid)
-                     --       hs.notify.show("SSID change",
-                     --          string.format("From '%s' to '%s'",
-                     --          prev_ssid, new_ssid), "")
-                     --    end
-                     -- },
-                     { -- Enable proxy config when joining corp network
-                       to = "corpnet01",
-                       fn = {hs.fnutils.partial(reconfigSpotifyProxy, true),
-                             hs.fnutils.partial(reconfigAdiumProxy, true),
-                             hs.fnutils.partial(forceKillProcess, "Dropbox"),
-                             hs.fnutils.partial(stopApp, "Evernote"),
-                       }
-                     },
-                     { -- Disable proxy config when leaving corp network
-                       from = "corpnet01",
-                       fn = {hs.fnutils.partial(reconfigSpotifyProxy, false),
-                             hs.fnutils.partial(reconfigAdiumProxy, false),
-                             hs.fnutils.partial(startApp, "Dropbox"),
-                       }
-                     },
-                   }
-                 },
-                 start = true,
-               }
-)
 
 local wm=hs.webview.windowMasks
 Install:andUse("PopupTranslateSelection",
@@ -548,6 +431,7 @@ end
 Install:andUse("WinWin", {
                }
 )
+
 if spoon.WinWin then
     spoon.ModalMgr:new("resizeM")
     local cmodal = spoon.ModalMgr.modal_list["resizeM"]
@@ -584,13 +468,97 @@ if spoon.WinWin then
     cmodal:bind('', '`', 'Center Cursor', function() spoon.WinWin:centerCursor() end)
 
     -- Register resizeM with modal supervisor
-    hsresizeM_keys = hsresizeM_keys or {"alt", "R"}
+    hsresizeM_keys = hsresizeM_keys or {hyper, "R"}
     if string.len(hsresizeM_keys[2]) > 0 then
         spoon.ModalMgr.supervisor:bind(hsresizeM_keys[1], hsresizeM_keys[2], "Enter resizeM Environment", function()
             -- Deactivate some modal environments or not before activating a new one
             spoon.ModalMgr:deactivateAll()
             -- Show an status indicator so we know we're in some modal environment now
             spoon.ModalMgr:activate({"resizeM"}, "#B22222")
+        end)
+    end
+end
+
+-- Register Hammerspoon Search
+Install:andUse("HSearch", {
+               }
+)
+if spoon.HSearch then
+    hsearch_keys = hsearch_keys or {hyper, "s"}
+    if string.len(hsearch_keys[2]) > 0 then
+        spoon.ModalMgr.supervisor:bind(hsearch_keys[1], hsearch_keys[2], 'Launch Hammerspoon Search', function() spoon.HSearch:toggleShow() end)
+    end
+end
+
+----------------------------------------------------------------------------------------------------
+-- clipshowM modal environment
+Install:andUse("ClipShow", {
+               }
+)
+if spoon.ClipShow then
+    spoon.ModalMgr:new("clipshowM")
+    local cmodal = spoon.ModalMgr.modal_list["clipshowM"]
+    cmodal:bind('', 'escape', 'Deactivate clipshowM', function()
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'Q', 'Deactivate clipshowM', function()
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'N', 'Save this Session', function()
+        spoon.ClipShow:saveToSession()
+    end)
+    cmodal:bind('', 'R', 'Restore last Session', function()
+        spoon.ClipShow:restoreLastSession()
+    end)
+    cmodal:bind('', 'B', 'Open in Browser', function()
+        spoon.ClipShow:openInBrowserWithRef()
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'S', 'Search with Bing', function()
+        spoon.ClipShow:openInBrowserWithRef("https://www.bing.com/search?q=")
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'M', 'Open in MacVim', function()
+        spoon.ClipShow:openWithCommand("/usr/local/bin/mvim")
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'F', 'Save to Desktop', function()
+        spoon.ClipShow:saveToFile()
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'H', 'Search in Github', function()
+        spoon.ClipShow:openInBrowserWithRef("https://github.com/search?q=")
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'G', 'Search with Google', function()
+        spoon.ClipShow:openInBrowserWithRef("https://www.google.com/search?q=")
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+    cmodal:bind('', 'L', 'Open in Sublime Text', function()
+        spoon.ClipShow:openWithCommand("/usr/local/bin/subl")
+        spoon.ClipShow:toggleShow()
+        spoon.ModalMgr:deactivate({"clipshowM"})
+    end)
+
+    -- Register clipshowM with modal supervisor
+    hsclipsM_keys = hsclipsM_keys or {"alt", "C"}
+    if string.len(hsclipsM_keys[2]) > 0 then
+        spoon.ModalMgr.supervisor:bind(hsclipsM_keys[1], hsclipsM_keys[2], "Enter clipshowM Environment", function()
+            -- We need to take action upon hsclipsM_keys is pressed, since pressing another key to showing ClipShow panel is redundant.
+            spoon.ClipShow:toggleShow()
+            -- Need a little trick here. Since the content type of system clipboard may be "URL", in which case we don't need to activate clipshowM.
+            if spoon.ClipShow.canvas:isShowing() then
+                spoon.ModalMgr:deactivateAll()
+                spoon.ModalMgr:activate({"clipshowM"})
+            end
         end)
     end
 end
